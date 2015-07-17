@@ -12,9 +12,12 @@ import pytz
 import sys
 import curses
 import curses.panel
+import curses.textpad
+import curses.wrapper
 import json
 import math
 import logging as log
+import sqlalchemy
 from dateutil import parser
 from optparse import OptionParser
 from datetime import datetime, timedelta
@@ -22,8 +25,13 @@ from datetime import datetime, timedelta
 
 class DBInterface:
 
-    def __init__(self):
+    ESC_KEY = 27
+    ALT_KEY_ENTER = 10
 
+    def __init__(self):
+        curses.wrapper(self.fake_init)
+
+    def fake_init(self,stdscr):
         # Setup Curses Screen
         self.stdscr = curses.initscr()
         self.stdscr.keypad(1)
@@ -130,9 +138,72 @@ class DBInterface:
                 if tmp_x > first_y:
                     tmp_cur = (tmp_x - 1, tmp_y)
                     self.set_select_cursor(win1, tmp_cur)
+            elif c == curses.KEY_ENTER or c == ALT_KEY_ENTER:
+                tmp_y, tmp_x = self.sel_cursor
+                if tmp_y == first_y:
+                    self.database_select_screen()
+                else:
+                    pass
+            elif c == 27:
+                sys.exit()
+
 
             # Update Screen
             self.refresh_screen()
+
+    def database_select_screen(self):
+        """Handles the database selection loop."""
+
+        # Set variables
+        height, width = self.stdscr.getmaxyx()
+        first_y = 3
+
+        menu_width = int(width * 0.33)
+        win1, panel1 = self.make_panel(9, menu_width, 6, (width / 2) - (menu_width / 2), "Select Database:")
+        win1.addstr(first_y, 1, "Enter Database Here:")
+        panel1.top()
+        tmp_height,tmp_width = win1.getmaxyx()
+        edit_win = curses.newwin(1, tmp_width - 5, 6 + first_y + 2, (width / 2) - (menu_width / 2) + 2)
+        rect = curses.textpad.rectangle(win1, first_y + 1, 1, first_y + 3, tmp_width - 2)
+
+        self.refresh_screen()
+
+        text = curses.textpad.Textbox(edit_win).edit()
+        del edit_win
+
+        self.attempt_connection(win1,text.rstrip())
+        # TODO: Handle success or failure of attempted connection
+
+
+    def attempt_connection(self,win,db_string):
+        """Helper function for attempting to create a engine and connect to a db"""
+
+        try:
+            self.engine = sqlalchemy.create_engine(db_string)
+        except Exception:
+            self.alert_window("Database does not exist!")
+        else:
+            try:
+                self.connection = engine.connect()
+            except Exception:
+                self.alert_window("Database could not be connected to!")
+
+    def alert_window(self,msg):
+        """Creates a window useful for displaying error messages"""
+
+        height, width = self.stdscr.getmaxyx()
+        menu_width = int(width * 0.33)
+        alert_win = curses.newwin(9, menu_width, 6, (width / 2) - (menu_width / 2))
+        alert_win.box()
+        alert_win.addstr(9 / 2, menu_width / 2 - menu_width / 4, msg)
+
+        self.refresh_screen()
+        alert_win.refresh()
+        while 1:
+            c = self.stdscr.getch()
+            if c == curses.KEY_ENTER or c == ALT_KEY_ENTER:
+                break
+        del alert_win
 
 
     def refresh_screen(self):
