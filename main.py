@@ -18,6 +18,8 @@ import json
 import math
 import logging as log
 import sqlalchemy
+import subprocess
+from pipes import quote
 from dateutil import parser
 from optparse import OptionParser
 from datetime import datetime, timedelta
@@ -138,7 +140,7 @@ class DBInterface:
                 if tmp_x > first_y:
                     tmp_cur = (tmp_x - 1, tmp_y)
                     self.set_select_cursor(win1, tmp_cur)
-            elif c == curses.KEY_ENTER or c == ALT_KEY_ENTER:
+            elif c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
                 tmp_y, tmp_x = self.sel_cursor
                 if tmp_y == first_y:
                     self.database_select_screen()
@@ -171,9 +173,10 @@ class DBInterface:
         text = curses.textpad.Textbox(edit_win).edit()
         del edit_win
 
-        self.attempt_connection(win1,text.rstrip())
+        self.list_databases(text.rstrip())
+        # if self.attempt_connection(win1,text.rstrip()):
+        #     self.list_databases()
         # TODO: Handle success or failure of attempted connection
-
 
     def attempt_connection(self,win,db_string):
         """Helper function for attempting to create a engine and connect to a db"""
@@ -187,6 +190,43 @@ class DBInterface:
                 self.connection = engine.connect()
             except Exception:
                 self.alert_window("Database could not be connected to!")
+        return True
+
+    def list_databases(self,server_string):
+        user,host = server_string.split('@')
+        username,password = user.split(':')
+        command="PGPASSWORD={} psql -h {} -U {} --list".format(quote(password),quote(host),quote(username))
+        # TODO: validate and SANITIZE string
+        # TODO: SHELL SHOULD NOT EQUAL TRUE
+        process = subprocess.Popen(command,shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout,stderr = process.communicate()
+        if process.returncode != 0:
+            self.alert_window(str(process.returncode))
+            return
+
+        lines = stdout.split('\n')
+        db_names = [line.split('|')[0].strip() for line in lines[3:-2] if line.split('|')[0].strip()]
+        self.alert_window(db_names[0])
+
+        pad = curses.newpad(40,len(db_names))
+        pad_pos = 0
+        i = 0
+        for name in db_names:
+            pad.addstr(i,1,name)
+            i+=1
+
+        while 1:
+            c = self.stdscr.getch()
+            if c == curses.KEY_DOWN:
+                pad_pos=max(pad_pos-1,0)
+                pad.refresh(pad_pos, 0, 5, 5, 10, 60)
+            elif c == curses.KEY_UP:
+                pad_pos=min(pad_pos+1,len(db_names))
+                pad.refresh(pad_pos, 0, 5, 5, 10, 60)
+            self.refresh_screen()
+
+
+
 
     def alert_window(self,msg):
         """Creates a window useful for displaying error messages"""
@@ -201,7 +241,7 @@ class DBInterface:
         alert_win.refresh()
         while 1:
             c = self.stdscr.getch()
-            if c == curses.KEY_ENTER or c == ALT_KEY_ENTER:
+            if c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
                 break
         del alert_win
 
