@@ -31,6 +31,7 @@ class DBInterface:
     ALT_KEY_ENTER = 10
     protocol = "postgresql"
     driver = "pg8000"
+    y = 0
 
     def __init__(self):
         curses.wrapper(self.fake_init)
@@ -145,7 +146,17 @@ class DBInterface:
             elif c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
                 tmp_y, tmp_x = self.sel_cursor
                 if tmp_y == first_y:
+                    self.y = 1
                     self.database_select_screen()
+                elif tmp_y == (first_y + 1):
+                    self.y = 2
+                    self.sql_select_screen()	
+                elif tmp_y == (first_y + 2):
+                    self.y = 3
+                    self.export_select_screen()
+                elif tmp_y == (first_y + 3):
+                    self.y = 4
+                    self.import_select_screen()						
                 else:
                     pass
             elif c == 27:
@@ -188,14 +199,34 @@ class DBInterface:
             db_string=self.create_db_string(username,password,host)
             self.engine = sqlalchemy.create_engine(db_string)
         except Exception as msg:
-            self.alert_window("Database does not exist!")
-            return False
+			if self.y == 1:
+				self.alert_window("Database does not exist!")
+				return False
+			elif self.y == 2:
+				self.alert_window("SQL does not exist!")
+				return False
+			elif self.y == 3:
+				self.alert_window("Export does not exist!")
+				return False
+			elif self.y == 4:
+				self.alert_window("Import does not exist!")
+				return False
         else:
             try:
                 self.connection = self.engine.connect()
             except Exception as msg:
-                self.alert_window("Database could not be connected to!")
-                return False
+				if self.y == 1:
+					self.alert_window("Database could not be connected to!")
+					return False
+				elif self.y == 2:
+					self.alert_window("SQL could not be connected to!")
+					return False
+				elif self.y == 3:
+					self.alert_window("Export could not be connected to!")
+					return False
+				elif self.y == 4:
+					self.alert_window("Import could not be connected to!")
+					return False
         return True
 
     def create_db_string(self,username,password,hostname):
@@ -242,6 +273,75 @@ class DBInterface:
             db_win.refresh()
             self.refresh_screen()
 
+    def sql_select_screen(self):
+        """Handles the database selection loop."""
+
+        # Set variables
+        height, width = self.stdscr.getmaxyx()
+        first_y = 3
+
+        menu_width = int(width * 0.33)
+        win1, panel1 = self.make_panel(9, menu_width, 6, (width / 2) - (menu_width / 2), "Select SQL:")
+        win1.addstr(first_y, 1, "Enter SQL Here:")
+        panel1.top()
+        tmp_height,tmp_width = win1.getmaxyx()
+        edit_win = curses.newwin(1, tmp_width - 5, 6 + first_y + 2, (width / 2) - (menu_width / 2) + 2)
+        rect = curses.textpad.rectangle(win1, first_y + 1, 1, first_y + 3, tmp_width - 2)
+
+        self.refresh_screen()
+
+        text = curses.textpad.Textbox(edit_win).edit()
+        del edit_win
+
+        self.attempt_connection(win1,text.rstrip())
+        # TODO: Handle success or failure of attempted connection
+
+    def export_select_screen(self):
+        """Handles the database selection loop."""
+
+        # Set variables
+        height, width = self.stdscr.getmaxyx()
+        first_y = 3
+
+        menu_width = int(width * 0.33)
+        win1, panel1 = self.make_panel(9, menu_width, 6, (width / 2) - (menu_width / 2), "Select Export:")
+        win1.addstr(first_y, 1, "Enter Export Location Here:")
+        panel1.top()
+        tmp_height,tmp_width = win1.getmaxyx()
+        edit_win = curses.newwin(1, tmp_width - 5, 6 + first_y + 2, (width / 2) - (menu_width / 2) + 2)
+        rect = curses.textpad.rectangle(win1, first_y + 1, 1, first_y + 3, tmp_width - 2)
+
+        self.refresh_screen()
+
+        text = curses.textpad.Textbox(edit_win).edit()
+        del edit_win
+
+        self.attempt_connection(win1,text.rstrip())
+        # TODO: Handle success or failure of attempted connection
+
+    def import_select_screen(self):
+        """Handles the database selection loop."""
+
+        # Set variables
+        height, width = self.stdscr.getmaxyx()
+        first_y = 3
+
+        menu_width = int(width * 0.33)
+        win1, panel1 = self.make_panel(9, menu_width, 6, (width / 2) - (menu_width / 2), "Select Import:")
+        win1.addstr(first_y, 1, "Enter Import Address Here:")
+        panel1.top()
+        tmp_height,tmp_width = win1.getmaxyx()
+        edit_win = curses.newwin(1, tmp_width - 5, 6 + first_y + 2, (width / 2) - (menu_width / 2) + 2)
+        rect = curses.textpad.rectangle(win1, first_y + 1, 1, first_y + 3, tmp_width - 2)
+
+        self.refresh_screen()
+
+        text = curses.textpad.Textbox(edit_win).edit()
+        del edit_win
+
+        self.attempt_connection(win1,text.rstrip())
+        # TODO: Handle success or failure of attempted connection
+		
     def alert_window(self,msg):
         """Creates a window useful for displaying error messages"""
 
