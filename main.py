@@ -29,6 +29,8 @@ class DBInterface:
 
     ESC_KEY = 27
     ALT_KEY_ENTER = 10
+    protocol = "postgresql"
+    driver = "pg8000"
 
     def __init__(self):
         curses.wrapper(self.fake_init)
@@ -149,20 +151,19 @@ class DBInterface:
             elif c == 27:
                 sys.exit()
 
-
             # Update Screen
             self.refresh_screen()
 
     def database_select_screen(self):
-        """Handles the database selection loop."""
+        """Handles the database selection loop. Can be removed after we add commandline args"""
 
         # Set variables
         height, width = self.stdscr.getmaxyx()
         first_y = 3
 
         menu_width = int(width * 0.33)
-        win1, panel1 = self.make_panel(9, menu_width, 6, (width / 2) - (menu_width / 2), "Select Database:")
-        win1.addstr(first_y, 1, "Enter Database Here:")
+        win1, panel1 = self.make_panel(9, menu_width, 6, (width / 2) - (menu_width / 2), "Connect to Server:")
+        win1.addstr(first_y, 1, "Enter [username:password@hostname] Here:")
         panel1.top()
         tmp_height,tmp_width = win1.getmaxyx()
         edit_win = curses.newwin(1, tmp_width - 5, 6 + first_y + 2, (width / 2) - (menu_width / 2) + 2)
@@ -173,60 +174,73 @@ class DBInterface:
         text = curses.textpad.Textbox(edit_win).edit()
         del edit_win
 
-        self.list_databases(text.rstrip())
-        # if self.attempt_connection(win1,text.rstrip()):
-        #     self.list_databases()
-        # TODO: Handle success or failure of attempted connection
+        if self.attempt_connection(win1,text.rstrip()):
+            del win1
+            del panel1
+            self.list_databases_screen()
 
-    def attempt_connection(self,win,db_string):
-        """Helper function for attempting to create a engine and connect to a db"""
+    def attempt_connection(self,win,input_string):
+        """Helper function for attempting to create a engine and connect to a db."""
 
         try:
+            user,host = input_string.split('@')
+            username,password = user.split(':')
+            db_string=self.create_db_string(username,password,host)
             self.engine = sqlalchemy.create_engine(db_string)
-        except Exception:
+        except Exception as msg:
             self.alert_window("Database does not exist!")
+            return False
         else:
             try:
-                self.connection = engine.connect()
-            except Exception:
+                self.connection = self.engine.connect()
+            except Exception as msg:
                 self.alert_window("Database could not be connected to!")
+                return False
         return True
 
-    def list_databases(self,server_string):
-        user,host = server_string.split('@')
-        username,password = user.split(':')
-        command="PGPASSWORD={} psql -h {} -U {} --list".format(quote(password),quote(host),quote(username))
-        # TODO: validate and SANITIZE string
-        # TODO: SHELL SHOULD NOT EQUAL TRUE
-        process = subprocess.Popen(command,shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout,stderr = process.communicate()
-        if process.returncode != 0:
-            self.alert_window(str(process.returncode))
-            return
+    def create_db_string(self,username,password,hostname):
+        """Helper function for creating and formatting a remote server/db string. Will have to be expanded to support MySQL."""
+        return "{}+{}://{}:{}@{}/postgres".format(self.protocol,self.driver,username,password,hostname)
 
-        lines = stdout.split('\n')
-        db_names = [line.split('|')[0].strip() for line in lines[3:-2] if line.split('|')[0].strip()]
-        self.alert_window(db_names[0])
+    def list_databases_screen(self):
+        """Screen for listing databases. Will have to be expanded to support MySQL"""
+        db_names = self.engine.execute("SELECT datname FROM pg_database WHERE datistemplate = false")
+        db_names = db_names.fetchall()
 
-        pad = curses.newpad(40,len(db_names))
-        pad_pos = 0
+        height, width = self.stdscr.getmaxyx()
+        menu_width = int(width * 0.33)
+        db_win, panel1 = self.make_panel(len(db_names)+3, menu_width, 6, (width / 2) - (menu_width / 2), "Select Database")
+        db_win.box()
+        win_pos = 0
+
         i = 0
         for name in db_names:
-            pad.addstr(i,1,name)
+            db_win.addstr(i+2,1," [ ] {}".format(name['datname']))
             i+=1
+
+        # Hide Cursor
+        curses.curs_set(0)
+
+        x_pos = 3
+        self.sel_cursor = (2, x_pos)
+        self.set_select_cursor(db_win, self.sel_cursor)
+        curses.panel.update_panels()
+        self.refresh_screen()
+        db_win.refresh()
 
         while 1:
             c = self.stdscr.getch()
             if c == curses.KEY_DOWN:
-                pad_pos=max(pad_pos-1,0)
-                pad.refresh(pad_pos, 0, 5, 5, 10, 60)
+                win_pos=min(win_pos+1,len(db_names)-1)
+                self.set_select_cursor(db_win, (win_pos+2,x_pos))
             elif c == curses.KEY_UP:
-                pad_pos=min(pad_pos+1,len(db_names))
-                pad.refresh(pad_pos, 0, 5, 5, 10, 60)
+                win_pos=max(win_pos-1,0)
+                self.set_select_cursor(db_win, (win_pos+2,x_pos))
+            elif c == 27:
+                del db_win
+                return
+            db_win.refresh()
             self.refresh_screen()
-
-
-
 
     def alert_window(self,msg):
         """Creates a window useful for displaying error messages"""
@@ -244,7 +258,6 @@ class DBInterface:
             if c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
                 break
         del alert_win
-
 
     def refresh_screen(self):
         """Refreshes the main DBInterface screen to readjust proportions."""
