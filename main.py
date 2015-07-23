@@ -45,6 +45,7 @@ class DBInterface:
 
         # Variables
         self.sel_cursor = (0, 0)
+        self.engine = None
 
         self.run()
 
@@ -171,21 +172,24 @@ class DBInterface:
 
         self.refresh_screen()
 
-        text = curses.textpad.Textbox(edit_win).edit()
+        text = curses.textpad.Textbox(edit_win).edit().rstrip()
         del edit_win
 
-        if self.attempt_connection(win1,text.rstrip()):
+        if self.attempt_connection(text):
             del win1
             del panel1
-            self.list_databases_screen()
+            self.list_databases_screen(text)
 
-    def attempt_connection(self,win,input_string):
+    def attempt_connection(self,input_string,database="postgres"):
         """Helper function for attempting to create a engine and connect to a db."""
+
+        if self.engine:
+            self.engine.dispose()
 
         try:
             user,host = input_string.split('@')
             username,password = user.split(':')
-            db_string=self.create_db_string(username,password,host)
+            db_string=self.create_db_string(username,password,host,database)
             self.engine = sqlalchemy.create_engine(db_string)
         except Exception as msg:
             self.alert_window("Database does not exist!")
@@ -198,11 +202,11 @@ class DBInterface:
                 return False
         return True
 
-    def create_db_string(self,username,password,hostname):
+    def create_db_string(self,username,password,hostname,database):
         """Helper function for creating and formatting a remote server/db string. Will have to be expanded to support MySQL."""
-        return "{}+{}://{}:{}@{}/postgres".format(self.protocol,self.driver,username,password,hostname)
+        return "{}+{}://{}:{}@{}/{}".format(self.protocol,self.driver,username,password,hostname,database)
 
-    def list_databases_screen(self):
+    def list_databases_screen(self,input_string):
         """Screen for listing databases. Will have to be expanded to support MySQL"""
         db_names = self.engine.execute("SELECT datname FROM pg_database WHERE datistemplate = false")
         db_names = db_names.fetchall()
@@ -236,10 +240,64 @@ class DBInterface:
             elif c == curses.KEY_UP:
                 win_pos=max(win_pos-1,0)
                 self.set_select_cursor(db_win, (win_pos+2,x_pos))
+            elif c == self.ALT_KEY_ENTER or c == curses.KEY_ENTER:
+                if self.attempt_connection(input_string, db_names[win_pos]['datname']):
+                    self.list_tables_screen()
+                else:
+                    del db_win
+                    return
             elif c == 27:
                 del db_win
                 return
             db_win.refresh()
+            self.refresh_screen()
+
+    def list_tables_screen(self):
+        """Screen for listing tables. Will have to be expanded to support MySQL"""
+        table_names = self.engine.table_names()
+        if not len(table_names):
+            self.alert_window('Database is empty!')
+            return
+
+        height, width = self.stdscr.getmaxyx()
+        menu_width = int(width * 0.33)
+        table_win, panel1 = self.make_panel(len(table_names)+3, menu_width, 6, (width / 2) - (menu_width / 2), "Select Table")
+        table_win.box()
+        win_pos = 0
+
+        i = 0
+        for name in table_names:
+            table_win.addstr(i+2,1," [ ] {}".format(name))
+            i+=1
+
+        # Hide Cursor
+        curses.curs_set(0)
+
+        x_pos = 3
+        self.sel_cursor = (2, x_pos)
+        self.set_select_cursor(table_win, self.sel_cursor)
+        curses.panel.update_panels()
+        self.refresh_screen()
+        table_win.refresh()
+
+        while 1:
+            c = self.stdscr.getch()
+            if c == curses.KEY_DOWN:
+                win_pos=min(win_pos+1,len(table_names)-1)
+                self.set_select_cursor(table_win, (win_pos+2,x_pos))
+            elif c == curses.KEY_UP:
+                win_pos=max(win_pos-1,0)
+                self.set_select_cursor(table_win, (win_pos+2,x_pos))
+            # elif c == self.ALT_KEY_ENTER or c == curses.KEY_ENTER:
+            #     if self.attempt_connection(input_string, table_names[win_pos]['datname']):
+            #         self.list_tables_screen()
+            #     else:
+            #         del table_win
+            #         return
+            elif c == 27:
+                del table_win
+                return
+            table_win.refresh()
             self.refresh_screen()
 
     def alert_window(self,msg):
@@ -258,6 +316,7 @@ class DBInterface:
             if c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
                 break
         del alert_win
+        self.refresh_screen()
 
     def refresh_screen(self):
         """Refreshes the main DBInterface screen to readjust proportions."""
