@@ -1,2 +1,4 @@
 pytz
 sqlalchemy
+pg8000
+MySQL-python
