@@ -17,11 +17,12 @@ import curses.wrapper
 import json
 import math
 import logging as log
+import db
 import sqlalchemy
 import subprocess
+import argparse
 from pipes import quote
 from dateutil import parser
-from optparse import OptionParser
 from datetime import datetime, timedelta
 
 
@@ -29,13 +30,27 @@ class DBInterface:
 
     ESC_KEY = 27
     ALT_KEY_ENTER = 10
-    protocol = "postgresql"
-    driver = "pg8000"
+    db = None
 
     def __init__(self):
         curses.wrapper(self.fake_init)
 
     def fake_init(self,stdscr):
+        parser = argparse.ArgumentParser(add_help=False) #we need -h switch
+        parser.add_argument('-dbms', '--dbms', choices=['postgres', 'mysql'], \
+                required=True, metavar='DBTYPE')
+        parser.add_argument('-u', '--username', required=True, metavar='USER')
+        parser.add_argument('-p', '--password', required=True, metavar='PASS')
+        parser.add_argument('-h', '--hostname', default='localhost', metavar='HOST')
+        args = parser.parse_args()
+        if args.dbms == 'postgres':
+            self.db = db.PostgresDatabase(args.username, args.password, args.hostname)
+        elif args.dbms == 'mysql':
+            self.db = db.MySQLDatabase(args.username, args.password, args.hostname)
+        else:
+            raise ValueError('dbms should be postgres or mysql')
+        self.db.setup()
+
         # Setup Curses Screen
         self.stdscr = curses.initscr()
         self.stdscr.keypad(1)
@@ -45,7 +60,6 @@ class DBInterface:
 
         # Variables
         self.sel_cursor = (0, 0)
-        self.engine = None
 
         self.run()
 
@@ -146,7 +160,7 @@ class DBInterface:
             elif c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
                 tmp_y, tmp_x = self.sel_cursor
                 if tmp_y == first_y:
-                    self.database_select_screen()
+                    self.list_databases_screen()
                 else:
                     pass
             elif c == 27:
@@ -155,61 +169,9 @@ class DBInterface:
             # Update Screen
             self.refresh_screen()
 
-    def database_select_screen(self):
-        """Handles the database selection loop. Can be removed after we add commandline args"""
-
-        # Set variables
-        height, width = self.stdscr.getmaxyx()
-        first_y = 3
-
-        menu_width = int(width * 0.33)
-        win1, panel1 = self.make_panel(9, menu_width, 6, (width / 2) - (menu_width / 2), "Connect to Server:")
-        win1.addstr(first_y, 1, "Enter [username:password@hostname] Here:")
-        panel1.top()
-        tmp_height,tmp_width = win1.getmaxyx()
-        edit_win = curses.newwin(1, tmp_width - 5, 6 + first_y + 2, (width / 2) - (menu_width / 2) + 2)
-        rect = curses.textpad.rectangle(win1, first_y + 1, 1, first_y + 3, tmp_width - 2)
-
-        self.refresh_screen()
-
-        text = curses.textpad.Textbox(edit_win).edit().rstrip()
-        del edit_win
-
-        if self.attempt_connection(text):
-            del win1
-            del panel1
-            self.list_databases_screen(text)
-
-    def attempt_connection(self,input_string,database="postgres"):
-        """Helper function for attempting to create a engine and connect to a db."""
-
-        if self.engine:
-            self.engine.dispose()
-
-        try:
-            user,host = input_string.split('@')
-            username,password = user.split(':')
-            db_string=self.create_db_string(username,password,host,database)
-            self.engine = sqlalchemy.create_engine(db_string)
-        except Exception as msg:
-            self.alert_window("Database does not exist!")
-            return False
-        else:
-            try:
-                self.connection = self.engine.connect()
-            except Exception as msg:
-                self.alert_window("Database could not be connected to!")
-                return False
-        return True
-
-    def create_db_string(self,username,password,hostname,database):
-        """Helper function for creating and formatting a remote server/db string. Will have to be expanded to support MySQL."""
-        return "{}+{}://{}:{}@{}/{}".format(self.protocol,self.driver,username,password,hostname,database)
-
-    def list_databases_screen(self,input_string):
+    def list_databases_screen(self):
         """Screen for listing databases. Will have to be expanded to support MySQL"""
-        db_names = self.engine.execute("SELECT datname FROM pg_database WHERE datistemplate = false")
-        db_names = db_names.fetchall()
+        db_names = self.db.list_databases()
 
         height, width = self.stdscr.getmaxyx()
         menu_width = int(width * 0.33)
@@ -219,7 +181,7 @@ class DBInterface:
 
         i = 0
         for name in db_names:
-            db_win.addstr(i+2,1," [ ] {}".format(name['datname']))
+            db_win.addstr(i+2,1," [ ] {}".format(name))
             i+=1
 
         # Hide Cursor
@@ -241,11 +203,12 @@ class DBInterface:
                 win_pos=max(win_pos-1,0)
                 self.set_select_cursor(db_win, (win_pos+2,x_pos))
             elif c == self.ALT_KEY_ENTER or c == curses.KEY_ENTER:
-                if self.attempt_connection(input_string, db_names[win_pos]['datname']):
-                    self.list_tables_screen()
-                else:
+                try:
+                    self.db.database_connect(db_names[win_pos])
+                except Exception:
                     del db_win
                     return
+                self.list_tables_screen()
             elif c == 27:
                 del db_win
                 return
@@ -254,7 +217,7 @@ class DBInterface:
 
     def list_tables_screen(self):
         """Screen for listing tables. Will have to be expanded to support MySQL"""
-        table_names = self.engine.table_names()
+        table_names = self.db.list_table_names()
         if not len(table_names):
             self.alert_window('Database is empty!')
             return
