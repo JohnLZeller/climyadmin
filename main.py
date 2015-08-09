@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from __future__ import division
 """climyadmin.py
 
 A simple command line interface that allows for the control of a MySQL
@@ -18,13 +19,11 @@ import json
 import math
 import logging as log
 import db
-import sqlalchemy
 import subprocess
 import argparse
 from pipes import quote
 from dateutil import parser
 from datetime import datetime, timedelta
-
 
 class DBInterface:
 
@@ -76,9 +75,9 @@ class DBInterface:
         self.stdscr.addstr(1, 1, "{0}".format("### cliMyAdmin ###".center(width - 2, ' ')))
 
         # Controls Info
-        self.stdscr.addstr(2, (width / 3) * 2, "{0}".format(
+        self.stdscr.addstr(2, (width // 3) * 2, "{0}".format(
                 "Controls: arrow keys (up/down), enter (select)"))
-        self.stdscr.addstr(3, (width / 3) * 2, "{0}".format(
+        self.stdscr.addstr(3, (width // 3) * 2, "{0}".format(
                 "          ESC key (close current window)"))
 
         # Print Boundaries
@@ -131,7 +130,7 @@ class DBInterface:
 
         # Print Menu Tabs
         menu_width = int(width * 0.13)
-        win1, panel1 = self.make_panel(9, menu_width, 6, (width / 2) - (menu_width / 2), "Main Menu")
+        win1, panel1 = self.make_panel(9, menu_width, 6, (width // 2) - (menu_width // 2), "Main Menu")
         win1.addstr(first_y, 1, " [ ] Databases")
         win1.addstr(first_y + 1, 1, " [ ] SQL")
         win1.addstr(first_y + 2, 1, " [ ] Export")
@@ -175,7 +174,7 @@ class DBInterface:
 
         height, width = self.stdscr.getmaxyx()
         menu_width = int(width * 0.33)
-        db_win, panel1 = self.make_panel(len(db_names)+3, menu_width, 6, (width / 2) - (menu_width / 2), "Select Database")
+        db_win, panel1 = self.make_panel(len(db_names)+3, menu_width, 6, (width // 2) - (menu_width // 2), "Select Database")
         db_win.box()
         win_pos = 0
 
@@ -203,11 +202,9 @@ class DBInterface:
                 win_pos=max(win_pos-1,0)
                 self.set_select_cursor(db_win, (win_pos+2,x_pos))
             elif c == self.ALT_KEY_ENTER or c == curses.KEY_ENTER:
-                try:
-                    self.db.database_connect(db_names[win_pos])
-                except Exception:
-                    del db_win
-                    return
+                self.db.database_connect(db_names[win_pos])
+                    # del db_win
+                    # return
                 self.list_tables_screen()
             elif c == 27:
                 del db_win
@@ -224,53 +221,118 @@ class DBInterface:
 
         height, width = self.stdscr.getmaxyx()
         menu_width = int(width * 0.33)
-        table_win, panel1 = self.make_panel(len(table_names)+3, menu_width, 6, (width / 2) - (menu_width / 2), "Select Table")
+        displayable_height = 10
+        window_top_margin = 6
+        inner_top_margin = inner_bottom_margin = 3
+        start_x = (width // 2) - (menu_width // 2)
+        table_win, panel1 = self.make_panel( \
+                displayable_height+inner_top_margin+inner_bottom_margin, \
+                menu_width, window_top_margin, start_x, "Select Table")
+        table_pad = curses.newpad(len(table_names), menu_width)
         table_win.box()
         win_pos = 0
 
         i = 0
         for name in table_names:
-            table_win.addstr(i+2,1," [ ] {}".format(name))
+            table_pad.addstr(i,1," [ ] {}".format(name))
             i+=1
 
         # Hide Cursor
         curses.curs_set(0)
 
         x_pos = 3
-        self.sel_cursor = (2, x_pos)
-        self.set_select_cursor(table_win, self.sel_cursor)
+        self.sel_cursor = (0, x_pos)
+        self.set_select_cursor(table_pad, self.sel_cursor)
         curses.panel.update_panels()
         self.refresh_screen()
-        table_win.refresh()
-
+        # table_pad.refresh(0,0, start_y, start_x, displayable_height, menu_width)
+        current_page = 1
         while 1:
             c = self.stdscr.getch()
             if c == curses.KEY_DOWN:
                 win_pos=min(win_pos+1,len(table_names)-1)
-                self.set_select_cursor(table_win, (win_pos+2,x_pos))
+                self.set_select_cursor(table_pad, (win_pos,x_pos))
+                self.refresh_screen()
             elif c == curses.KEY_UP:
                 win_pos=max(win_pos-1,0)
-                self.set_select_cursor(table_win, (win_pos+2,x_pos))
-            # elif c == self.ALT_KEY_ENTER or c == curses.KEY_ENTER:
-            #     if self.attempt_connection(input_string, table_names[win_pos]['datname']):
-            #         self.list_tables_screen()
-            #     else:
-            #         del table_win
-            #         return
+                self.set_select_cursor(table_pad, (win_pos,x_pos))
+                self.refresh_screen()
+            if win_pos > (current_page * displayable_height) - 1:
+                current_page += 1
+                self.refresh_screen()
+            elif win_pos < (current_page - 1) * displayable_height:
+                current_page -= 1
+                self.refresh_screen()
+            elif c == self.ALT_KEY_ENTER or c == curses.KEY_ENTER:
+                self.list_rows_screen(table_names[win_pos])
             elif c == 27:
+                del table_pad
                 del table_win
+                del panel1
                 return
-            table_win.refresh()
-            self.refresh_screen()
+            table_pad.refresh((current_page - 1) * displayable_height, 1, \
+                    inner_top_margin+window_top_margin, start_x+1, \
+                    inner_top_margin+window_top_margin+displayable_height-1, \
+                    start_x+menu_width-3)
+
+    def  list_rows_screen(self,table_name):
+        """Creates a menu with the rows of a table"""
+
+        column_names = self.db.list_column_names(table_name)
+        rows = self.db.list_rows(table_name)
+
+        height, width = self.stdscr.getmaxyx()
+        menu_width = int(width * 0.33)
+        displayable_height = 10
+        window_top_margin = 6
+        inner_top_margin = inner_bottom_margin = 3
+        start_x = (width // 2) - (menu_width // 2)
+        table_win, panel1 = self.make_panel( \
+                displayable_height+inner_top_margin+inner_bottom_margin, \
+                menu_width, window_top_margin, start_x, "Select Table")
+        table_pad = curses.newpad(10, menu_width)
+        table_win.box()
+
+        column_width = menu_width//len(column_names)
+        win_pos = 0
+
+        #TODO: put multiple things in a row
+        for idx, name in enumerate(column_names):
+            table_pad.addstr(0,idx*column_width,"| {}".format(name))
+        table_pad.addstr(1,0,'-' * menu_width)
+        for idx,row in enumerate(rows):
+            for j,name in enumerate(column_names):
+                table_pad.addstr(idx+2,j*column_width,"| {}".format(row[name]))
+
+        # Hide Cursor
+        curses.curs_set(0)
+
+        x_pos = 3
+        self.sel_cursor = (0, x_pos)
+        curses.panel.update_panels()
+        self.refresh_screen()
+        # table_pad.refresh(0,0, start_y, start_x, displayable_height, menu_width)
+        current_page = 1
+        while 1:
+            c = self.stdscr.getch()
+            if c == 27:
+                del table_pad
+                del table_win
+                del panel1
+                return
+            table_pad.refresh((current_page - 1) * displayable_height, 0, \
+                    inner_top_margin+window_top_margin, start_x+1, \
+                    inner_top_margin+window_top_margin+displayable_height-1, \
+                    start_x+menu_width-2)
 
     def alert_window(self,msg):
         """Creates a window useful for displaying error messages"""
 
         height, width = self.stdscr.getmaxyx()
         menu_width = int(width * 0.33)
-        alert_win = curses.newwin(9, menu_width, 6, (width / 2) - (menu_width / 2))
+        alert_win = curses.newwin(9, menu_width, 6, (width // 2) - (menu_width // 2))
         alert_win.box()
-        alert_win.addstr(9 / 2, menu_width / 2 - menu_width / 4, msg)
+        alert_win.addstr(9 // 2, menu_width // 2 - menu_width // 4, msg)
 
         self.refresh_screen()
         alert_win.refresh()
@@ -292,9 +354,9 @@ class DBInterface:
         self.stdscr.addstr(1, 1, "{0}".format("### cliMyAdmin ###".center(width - 2, ' ')))
 
         # Controls Info
-        self.stdscr.addstr(2, (width / 3) * 2, "{0}".format(
+        self.stdscr.addstr(2, (width // 3) * 2, "{0}".format(
                 "Controls: arrow keys (up/down), enter (select)"))
-        self.stdscr.addstr(3, (width / 3) * 2, "{0}".format(
+        self.stdscr.addstr(3, (width // 3) * 2, "{0}".format(
                 "          ESC key (close current window)"))
 
         # Print Boundaries
