@@ -6,16 +6,31 @@ Upon startup, the DBInterface class is instantiated, which then initializes our 
 
 ## Getting Started
 ### Instructions for Mac/Linux
-In order to run climyadmin, you need to make sure all dependencies are installed by running:
+In order to run climyadmin, you need to make sure all dependencies are installed.
+
+First, start by installing either MySQL, or PostgreSQL, and starting the server.
+
+Next, you can simply run the following to install python dependencies:
 
 ```
 pip install -r requirements.txt
 ```
 
-Once you've done that, you're ready to go! Run this to start it up:
+Once you've done that, you're ready to go!
+
+There are a few command line flags that are required at startup, including:
 
 ```
-python main.py
+-h <hostname>
+-u <sql-server-username>
+-p <sql-server-password>
+--dbms [mysql | postgres]
+```
+
+Here is an example of running this:
+
+```
+python main.py -u johnzeller -p mypassword -h localhost --dbms mysql
 ```
 
 ## Moving Forward
