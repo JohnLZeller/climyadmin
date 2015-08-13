@@ -32,6 +32,7 @@ class DBInterface:
     db = None
 
     def __init__(self, args):
+        self.win_list = []
         curses.wrapper(self.fake_init, args)
 
     def fake_init(self, stdscr, args):
@@ -154,9 +155,18 @@ class DBInterface:
                 tmp_y, tmp_x = self.sel_cursor
                 if tmp_y == first_y:
                     self.list_databases_screen()
+                elif tmp_y == (first_y + 1):
+                    self.y = 2
+                    self.sql_select_screen()
+                elif tmp_y == (first_y + 2):
+                    self.y = 3
+                    self.export_select_screen()
+                elif tmp_y == (first_y + 3):
+                    self.y = 4
+                    self.import_select_screen()
                 else:
                     pass
-            elif c == 27:
+            elif c == self.ESC_KEY:
                 sys.exit()
 
             # Update Screen
@@ -200,7 +210,7 @@ class DBInterface:
                     # del db_win
                     # return
                 self.list_tables_screen()
-            elif c == 27:
+            elif c == self.ESC_KEY:
                 del db_win
                 return
             db_win.refresh()
@@ -259,7 +269,7 @@ class DBInterface:
                 self.refresh_screen()
             elif c == self.ALT_KEY_ENTER or c == curses.KEY_ENTER:
                 self.list_rows_screen(table_names[win_pos])
-            elif c == 27:
+            elif c == self.ESC_KEY:
                 del table_pad
                 del table_win
                 del panel1
@@ -309,7 +319,7 @@ class DBInterface:
         current_page = 1
         while 1:
             c = self.stdscr.getch()
-            if c == 27:
+            if c == self.ESC_KEY:
                 del table_pad
                 del table_win
                 del panel1
@@ -318,6 +328,81 @@ class DBInterface:
                     inner_top_margin+window_top_margin, start_x+1, \
                     inner_top_margin+window_top_margin+displayable_height-1, \
                     start_x+menu_width-2)
+
+    def sql_select_screen(self):
+        """Handles the database selection loop."""
+
+        # Set variables
+        height, width = self.stdscr.getmaxyx()
+        first_y = 3
+
+        menu_width = int(width * 0.33)
+        win1, panel1 = self.make_panel(12, int(menu_width), 6, int((width / 2) - (menu_width / 2)), "SQL Query")
+        win1.addstr(first_y, 1, "Enter SQL Query Here:")
+        win1.addstr(first_y + 5, 1, "CTRL-H: Backspace")
+        win1.addstr(first_y + 6, 1, "CTRL-G: Exit text entry window")
+        win1.addstr(first_y + 7, 1, "ENTER: Submit")
+        panel1.top()
+        tmp_height, tmp_width = win1.getmaxyx()
+        edit_win = curses.newwin(1, int(tmp_width - 5), int(6 + first_y + 2), int((width / 2) - (menu_width / 2) + 2))
+        rect = curses.textpad.rectangle(win1, int(first_y + 1), 1, int(first_y + 3), int(tmp_width - 2))
+
+        self.refresh_screen()
+
+        text = curses.textpad.Textbox(edit_win).edit()
+        del edit_win
+
+        self.alert_window(text.rstrip())
+
+    def export_select_screen(self):
+        """Handles the database selection loop."""
+
+        # Set variables
+        height, width = self.stdscr.getmaxyx()
+        first_y = 3
+
+        menu_width = int(width * 0.33)
+        win1, panel1 = self.make_panel(12, int(menu_width), 6, int((width / 2) - (menu_width / 2)), "Export SQL to a File")
+        win1.addstr(first_y, 1, "Enter Absolute Path of File to Export to:")
+        win1.addstr(first_y + 5, 1, "CTRL-H: Backspace")
+        win1.addstr(first_y + 6, 1, "CTRL-G: Exit text entry window")
+        win1.addstr(first_y + 7, 1, "ENTER: Submit")
+        panel1.top()
+        tmp_height,tmp_width = win1.getmaxyx()
+        edit_win = curses.newwin(1, int(tmp_width - 5), int(6 + first_y + 2), int((width / 2) - (menu_width / 2) + 2))
+        rect = curses.textpad.rectangle(win1, int(first_y + 1), 1, int(first_y + 3), int(tmp_width - 2))
+
+        self.refresh_screen()
+
+        text = curses.textpad.Textbox(edit_win).edit()
+        del edit_win
+
+        self.alert_window(text.rstrip())
+
+    def import_select_screen(self):
+        """Handles the database selection loop."""
+
+        # Set variables
+        height, width = self.stdscr.getmaxyx()
+        first_y = 3
+
+        menu_width = int(width * 0.33)
+        win1, panel1 = self.make_panel(12, int(menu_width), 6, int((width / 2) - (menu_width / 2)), "Import SQL from a File")
+        win1.addstr(first_y, 1, "Enter Absolute Path of File to Import from:")
+        win1.addstr(first_y + 5, 1, "CTRL-H: Backspace")
+        win1.addstr(first_y + 6, 1, "CTRL-G: Exit text entry window")
+        win1.addstr(first_y + 7, 1, "ENTER: Submit")
+        panel1.top()
+        tmp_height,tmp_width = win1.getmaxyx()
+        edit_win = curses.newwin(1, int(tmp_width - 5), int(6 + first_y + 2), int((width / 2) - (menu_width / 2) + 2))
+        rect = curses.textpad.rectangle(win1, int(first_y + 1), 1, int(first_y + 3), int(tmp_width - 2))
+
+        self.refresh_screen()
+
+        text = curses.textpad.Textbox(edit_win).edit()
+        del edit_win
+
+        self.alert_window(text.rstrip())
 
     def alert_window(self,msg):
         """Creates a window useful for displaying error messages"""
