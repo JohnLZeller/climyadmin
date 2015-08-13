@@ -21,7 +21,7 @@ Once you've done that, you're ready to go!
 There are a few command line flags that are required at startup, including:
 
 ```
--h <hostname>
+-s <hostname>
 -u <sql-server-username>
 -p <sql-server-password>
 --dbms [mysql | postgres]
@@ -30,7 +30,7 @@ There are a few command line flags that are required at startup, including:
 Here is an example of running this:
 
 ```
-python main.py -u johnzeller -p mypassword -h localhost --dbms mysql
+python main.py -u johnzeller -p mypassword -s localhost --dbms mysql
 ```
 
 ## Moving Forward
