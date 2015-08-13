@@ -31,23 +31,17 @@ class DBInterface:
     ALT_KEY_ENTER = 10
     db = None
 
-    def __init__(self):
-        curses.wrapper(self.fake_init)
+    def __init__(self, args):
+        curses.wrapper(self.fake_init, args)
 
-    def fake_init(self,stdscr):
-        parser = argparse.ArgumentParser(add_help=False) #we need -h switch
-        parser.add_argument('-dbms', '--dbms', choices=['postgres', 'mysql'], \
-                required=True, metavar='DBTYPE')
-        parser.add_argument('-u', '--username', required=True, metavar='USER')
-        parser.add_argument('-p', '--password', required=True, metavar='PASS')
-        parser.add_argument('-h', '--hostname', default='localhost', metavar='HOST')
-        args = parser.parse_args()
+    def fake_init(self, stdscr, args):
         if args.dbms == 'postgres':
-            self.db = db.PostgresDatabase(args.username, args.password, args.hostname)
+            self.db = db.PostgresDatabase(args.username, args.password, args.server)
         elif args.dbms == 'mysql':
-            self.db = db.MySQLDatabase(args.username, args.password, args.hostname)
+            self.db = db.MySQLDatabase(args.username, args.password, args.server)
         else:
             raise ValueError('dbms should be postgres or mysql')
+
         self.db.setup()
 
         # Setup Curses Screen
@@ -380,4 +374,12 @@ class DBInterface:
             log.exception("Failed in __del__: {0}".format(e))
 
 if __name__ == "__main__":
-    shm = DBInterface()
+    parser = argparse.ArgumentParser(prog='climyadmin')
+    parser.add_argument('-u', '--username', required=True, metavar='USER', help='username for accessing your database server')
+    parser.add_argument('-p', '--password', required=True, metavar='PASS', help='password for accessing your database server')
+    parser.add_argument('-s', '--server', default='localhost', metavar='HOST', help='hostname for your database server')
+    parser.add_argument('-dbms', '--dbms', choices=['postgres', 'mysql'], \
+            required=True, metavar='DBTYPE', help='dbms chooses your database')
+    args = parser.parse_args()
+
+    shm = DBInterface(args)
