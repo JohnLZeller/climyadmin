@@ -19,6 +19,7 @@ import json
 import math
 import logging as log
 import db
+import os
 import subprocess
 import argparse
 from pipes import quote
@@ -32,10 +33,13 @@ class DBInterface:
     db = None
 
     def __init__(self, args):
+        self.args = args
         self.win_list = []
         curses.wrapper(self.fake_init, args)
 
     def fake_init(self, stdscr, args):
+        """Initialize the application."""
+
         if args.dbms == 'postgres':
             self.db = db.PostgresDatabase(args.username, args.password, args.server)
         elif args.dbms == 'mysql':
@@ -116,6 +120,14 @@ class DBInterface:
 
         return win
 
+    def init_main_menu_select_cursor(self, win):
+        """Initializes the main menu cursor to the first position"""
+
+        self.sel_cursor = (3, 3)
+        self.set_select_cursor(win, self.sel_cursor)
+        curses.panel.update_panels()
+        self.stdscr.refresh()
+
     def main_menu(self):
         """Handles the Main Menu loop."""
 
@@ -132,11 +144,7 @@ class DBInterface:
         win1.addstr(first_y + 3, 1, " [ ] Import")
         last_y = first_y + 3
 
-        # Initialize select cursor
-        self.sel_cursor = (3, 3)
-        self.set_select_cursor(win1, self.sel_cursor)
-        curses.panel.update_panels()
-        self.stdscr.refresh()
+        self.init_main_menu_select_cursor(win1)
 
         while 1:
             # Check for control movements
@@ -154,15 +162,16 @@ class DBInterface:
             elif c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
                 tmp_y, tmp_x = self.sel_cursor
                 if tmp_y == first_y:
+                    self.init_main_menu_select_cursor(win1)
                     self.list_databases_screen()
                 elif tmp_y == (first_y + 1):
-                    self.y = 2
+                    self.init_main_menu_select_cursor(win1)
                     self.sql_select_screen()
                 elif tmp_y == (first_y + 2):
-                    self.y = 3
+                    self.init_main_menu_select_cursor(win1)
                     self.export_select_screen()
                 elif tmp_y == (first_y + 3):
-                    self.y = 4
+                    self.init_main_menu_select_cursor(win1)
                     self.import_select_screen()
                 else:
                     pass
@@ -173,7 +182,8 @@ class DBInterface:
             self.refresh_screen()
 
     def list_databases_screen(self):
-        """Screen for listing databases. Will have to be expanded to support MySQL"""
+        """Screen for listing databases."""
+
         db_names = self.db.list_databases()
 
         height, width = self.stdscr.getmaxyx()
@@ -217,7 +227,8 @@ class DBInterface:
             self.refresh_screen()
 
     def list_tables_screen(self):
-        """Screen for listing tables. Will have to be expanded to support MySQL"""
+        """Screen for listing tables."""
+
         table_names = self.db.list_table_names()
         if not len(table_names):
             self.alert_window('Database is empty!')
@@ -279,7 +290,7 @@ class DBInterface:
                     inner_top_margin+window_top_margin+displayable_height-1, \
                     start_x+menu_width-3)
 
-    def  list_rows_screen(self,table_name):
+    def list_rows_screen(self,table_name):
         """Creates a menu with the rows of a table"""
 
         column_names = self.db.list_column_names(table_name)
@@ -330,7 +341,7 @@ class DBInterface:
                     start_x+menu_width-2)
 
     def sql_select_screen(self):
-        """Handles the database selection loop."""
+        """Allows the user to enter a SQL query to be submitted to the server."""
 
         # Set variables
         height, width = self.stdscr.getmaxyx()
@@ -352,10 +363,26 @@ class DBInterface:
         text = curses.textpad.Textbox(edit_win).edit()
         del edit_win
 
-        self.alert_window(text.rstrip())
+        # TODO: Retrieve whatever the query gives back, and display it
+        try:
+            self.db.execute(text)
+            alert_win, panel1 = self.make_panel(9, menu_width, 6, (width // 2) - (menu_width // 2), "Executed SQL!")
+        except Exception:
+            alert_win, panel1 = self.make_panel(9, menu_width, 6, (width // 2) - (menu_width // 2), "Failed to execute SQL!")
+
+        curses.panel.update_panels()
+        self.stdscr.refresh()
+
+        while 1:
+            # Check for control movements
+            c = self.stdscr.getch()
+            if c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
+                del alert_win
+                break
+        return
 
     def export_select_screen(self):
-        """Handles the database selection loop."""
+        """Allows the user to enter a file to export SQL to."""
 
         # Set variables
         height, width = self.stdscr.getmaxyx()
@@ -376,11 +403,176 @@ class DBInterface:
 
         text = curses.textpad.Textbox(edit_win).edit()
         del edit_win
+        filename = text.rstrip()
 
-        self.alert_window(text.rstrip())
+        self.export_main_menu(filename)
+
+    def export_main_menu(self, filename):
+        """Screen for displaying the export main menu."""
+
+        # Set variables
+        height, width = self.stdscr.getmaxyx()
+        first_y = 3
+
+        # Print Menu Tabs
+        menu_width = int(width * 0.33)
+        choice_win, panel1 = self.make_panel(9, menu_width, 6, (width // 2) - (menu_width // 2), "How would you like to export?")
+        choice_win.addstr(first_y, 1, " [ ] All Databases")
+        choice_win.addstr(first_y + 1, 1, " [ ] Select a Database")
+        last_y = first_y + 1
+
+        self.init_main_menu_select_cursor(choice_win)
+
+        while 1:
+            # Check for control movements
+            c = self.stdscr.getch()
+            if c == curses.KEY_DOWN:
+                tmp_x, tmp_y = self.sel_cursor
+                if tmp_x < last_y:
+                    tmp_cur = (tmp_x + 1, tmp_y)
+                    self.set_select_cursor(choice_win, tmp_cur)
+            elif c == curses.KEY_UP:
+                tmp_x, tmp_y = self.sel_cursor
+                if tmp_x > first_y:
+                    tmp_cur = (tmp_x - 1, tmp_y)
+                    self.set_select_cursor(choice_win, tmp_cur)
+            elif c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
+                tmp_y, tmp_x = self.sel_cursor
+                if tmp_y == first_y:
+                    self.export_all_databases(filename)
+                    del choice_win
+                    return
+                elif tmp_y == (first_y + 1):
+                    self.export_list_databases_screen(filename)
+                    del choice_win
+                    return
+                else:
+                    pass
+            elif c == self.ESC_KEY:
+                del choice_win
+                return
+
+            # Update Screen
+            choice_win.refresh()
+            self.refresh_screen()
+
+    def export_all_databases(self, filename):
+        """Exports all databases on the server to a specified filename."""
+
+        height, width = self.stdscr.getmaxyx()
+
+        mysql_command = "mysqldump --all-databases -u{0} -p{1} -h{2} > {3} 2>/dev/null".format(args.username, args.password, args.server, filename)
+
+        # TODO: Test this!
+        postgres_command = "pg_dumpall > {0} 2>/dev/null".format(filename)
+
+        if self.args.dbms == 'postgres':
+            # TODO: Test this!
+            # You can use a .pgpass in the home dir of the account that this will run to supply the password
+            os.system("echo {0}:*:*:{1}:{2} > ~/.pgpass".format(args.server, args.username, args.password))
+            ret = os.system(postgres_command)
+            os.system("rm ~/.pgpass")
+        elif self.args.dbms == 'mysql':
+            ret = os.system(mysql_command)
+
+        menu_width = int(width * 0.33)
+
+        if ret == 0:
+            alert_win, panel1 = self.make_panel(9, menu_width, 6, (width // 2) - (menu_width // 2), "Exported all databases!")
+        else:
+            alert_win, panel1 = self.make_panel(9, menu_width, 6, (width // 2) - (menu_width // 2), "Failed to export all databases!")
+
+        curses.panel.update_panels()
+        self.stdscr.refresh()
+
+        while 1:
+            # Check for control movements
+            c = self.stdscr.getch()
+            if c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
+                del alert_win
+                break
+        return
+
+    def export_list_databases_screen(self, filename):
+        """Screen for listing all databases and allowing the user to select one for exporting."""
+
+        db_names = self.db.list_databases()
+
+        height, width = self.stdscr.getmaxyx()
+        menu_width = int(width * 0.33)
+        db_win, panel1 = self.make_panel(len(db_names) + 6, menu_width, 6, (width // 2) - (menu_width // 2), "Select Database")
+        db_win.box()
+        win_pos = 0
+
+        i = 0
+        for name in db_names:
+            db_win.addstr(i+2,1," [ ] {}".format(name))
+            i += 1
+        db_win.addstr(i + 3, 1, "Press ENTER to export selection")
+
+        # Hide Cursor
+        curses.curs_set(0)
+
+        x_pos = 3
+        self.sel_cursor = (2, x_pos)
+        self.set_select_cursor(db_win, self.sel_cursor)
+        curses.panel.update_panels()
+        self.refresh_screen()
+        db_win.refresh()
+
+        while 1:
+            c = self.stdscr.getch()
+            if c == curses.KEY_DOWN:
+                win_pos=min(win_pos+1,len(db_names)-1)
+                self.set_select_cursor(db_win, (win_pos+2,x_pos))
+            elif c == curses.KEY_UP:
+                win_pos=max(win_pos-1,0)
+                self.set_select_cursor(db_win, (win_pos+2,x_pos))
+            elif c == self.ALT_KEY_ENTER or c == curses.KEY_ENTER:
+                self.export_database_selection(db_names[win_pos], filename)
+                del db_win
+                return
+            elif c == self.ESC_KEY:
+                del db_win
+                return
+            db_win.refresh()
+            self.refresh_screen()
+
+    def export_database_selection(self, selection, filename):
+        height, width = self.stdscr.getmaxyx()
+
+        mysql_command = "mysqldump {0} -u{1} -p{2} -h{3} > {4} 2>/dev/null".format(selection, args.username, args.password, args.server, filename)
+        postgres_command = "pg_dump {0} > {1} 2>/dev/null".format(selection, filename)
+
+        if self.args.dbms == 'postgres':
+            # TODO: Test this!
+            # You can use a .pgpass in the home dir of the account that this will run to supply the password
+            os.system("echo {0}:*:*:{1}:{2} > ~/.pgpass".format(args.server, args.username, args.password))
+            ret = os.system(postgres_command)
+            os.system("rm ~/.pgpass")
+        elif self.args.dbms == 'mysql':
+            ret = os.system(mysql_command)
+
+        menu_width = int(width * 0.33)
+
+        if ret == 0:
+            alert_win, panel1 = self.make_panel(9, menu_width, 6, (width // 2) - (menu_width // 2), "Exported database '{0}'!".format(selection))
+        else:
+            alert_win, panel1 = self.make_panel(9, menu_width, 6, (width // 2) - (menu_width // 2), "Failed to export database '{0}'!".format(selection))
+
+        curses.panel.update_panels()
+        self.stdscr.refresh()
+
+        while 1:
+            # Check for control movements
+            c = self.stdscr.getch()
+            if c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
+                del alert_win
+                break
+        return
 
     def import_select_screen(self):
-        """Handles the database selection loop."""
+        """Allows the user to enter a file to be imported and submitted to the server."""
 
         # Set variables
         height, width = self.stdscr.getmaxyx()
@@ -402,9 +594,43 @@ class DBInterface:
         text = curses.textpad.Textbox(edit_win).edit()
         del edit_win
 
-        self.alert_window(text.rstrip())
+        self.import_sql(text.rstrip())
+        del win1
+        return
 
-    def alert_window(self,msg):
+    def import_sql(self, filename):
+        """Imports a SQL file and submits it to the server."""
+
+        try:
+            f = open(filename, "r")
+            data = f.read()
+            f.close()
+        except Exception as e:
+            self.alert_window(str(e))
+            return
+
+        height, width = self.stdscr.getmaxyx()
+
+        menu_width = int(width * 0.33)
+
+        try:
+            self.db.execute(data)
+            alert_win, panel1 = self.make_panel(9, menu_width, 6, (width // 2) - (menu_width // 2), "Imported SQL from '{0}'!".format(filename))
+        except Exception:
+            alert_win, panel1 = self.make_panel(9, menu_width, 6, (width // 2) - (menu_width // 2), "Failed to import SQL from '{0}'!".format(filename))
+
+        curses.panel.update_panels()
+        self.stdscr.refresh()
+
+        while 1:
+            # Check for control movements
+            c = self.stdscr.getch()
+            if c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
+                del alert_win
+                break
+        return
+
+    def alert_window(self, msg):
         """Creates a window useful for displaying error messages"""
 
         height, width = self.stdscr.getmaxyx()
