@@ -25,6 +25,7 @@ import argparse
 from pipes import quote
 from dateutil import parser
 from datetime import datetime, timedelta
+from sqlalchemy.exc import ProgrammingError
 
 class DBInterface:
 
@@ -53,6 +54,7 @@ class DBInterface:
         self.stdscr = curses.initscr()
         self.stdscr.keypad(1)
         self.stdscr.nodelay(1)
+        curses.start_color()
         curses.noecho()
         curses.cbreak()
 
@@ -183,15 +185,16 @@ class DBInterface:
 
     def list_databases_screen(self):
         """Screen for listing databases."""
-
         db_names = self.db.list_databases()
 
         height, width = self.stdscr.getmaxyx()
         menu_width = int(width * 0.33)
-        db_win, panel1 = self.make_panel(len(db_names)+3, menu_width, 6, (width // 2) - (menu_width // 2), "Select Database")
+        db_win, panel1 = self.make_panel(len(db_names)+6, menu_width, 6, (width // 2) - (menu_width // 2), "Select Database")
         db_win.box()
         win_pos = 0
 
+        db_win.addstr(len(db_names)+3, 1, "a: add a new database")
+        db_win.addstr(len(db_names)+4, 1, "d: delete a database")
         i = 0
         for name in db_names:
             db_win.addstr(i+2,1," [ ] {}".format(name))
@@ -217,36 +220,59 @@ class DBInterface:
                 self.set_select_cursor(db_win, (win_pos+2,x_pos))
             elif c == self.ALT_KEY_ENTER or c == curses.KEY_ENTER:
                 self.db.database_connect(db_names[win_pos])
-                    # del db_win
-                    # return
                 self.list_tables_screen()
+            elif c == ord('a'):
+                text = self.text_window('Add new database title')
+                try:
+                    self.db.create_database(text)
+                except ProgrammingError:
+                    self.alert_window('Invalid Query!')
+                # lazily kick user back once
+                del db_win
+                return
+            elif c == ord('d'):
+                self.stdscr.nodelay(0)
+                self.alert_window('PRESSING d AGAIN WILL DELETE THIS DATABASE!')
+                c = self.stdscr.getch()
+                if c == ord('d'):
+                    # lazily kick user back once
+                    try:
+                        self.db.delete_database(db_names[win_pos])
+                    except ProgrammingError:
+                        self.alert_window('Invalid Query!')
+                    self.stdscr.nodelay(1)
+                    del db_win
+                    return
+                self.stdscr.nodelay(1)
             elif c == self.ESC_KEY:
                 del db_win
                 return
             db_win.refresh()
             self.refresh_screen()
 
+
     def list_tables_screen(self):
         """Screen for listing tables."""
 
         table_names = self.db.list_table_names()
-        if not len(table_names):
-            self.alert_window('Database is empty!')
-            return
 
         height, width = self.stdscr.getmaxyx()
         menu_width = int(width * 0.33)
         displayable_height = 10
         window_top_margin = 6
-        inner_top_margin = inner_bottom_margin = 3
+        inner_top_margin = 3
+        inner_bottom_margin = 3
         start_x = (width // 2) - (menu_width // 2)
         table_win, panel1 = self.make_panel( \
                 displayable_height+inner_top_margin+inner_bottom_margin, \
                 menu_width, window_top_margin, start_x, "Select Table")
-        table_pad = curses.newpad(len(table_names), menu_width)
+        length = len(table_names) if len(table_names) > 0 else 1
+        table_pad = curses.newpad(length, menu_width)
         table_win.box()
         win_pos = 0
 
+        table_win.addstr(inner_top_margin+displayable_height, 1, "a: add a new table")
+        table_win.addstr(inner_top_margin+displayable_height+1, 1,"d: delete a table")
         i = 0
         for name in table_names:
             table_pad.addstr(i,1," [ ] {}".format(name))
@@ -265,10 +291,16 @@ class DBInterface:
         while 1:
             c = self.stdscr.getch()
             if c == curses.KEY_DOWN:
+                if len(table_names) == 0:
+                    self.alert_window('No tables to select')
+                    continue
                 win_pos=min(win_pos+1,len(table_names)-1)
                 self.set_select_cursor(table_pad, (win_pos,x_pos))
                 self.refresh_screen()
             elif c == curses.KEY_UP:
+                if len(table_names) == 0:
+                    self.alert_window('No tables to select')
+                    continue
                 win_pos=max(win_pos-1,0)
                 self.set_select_cursor(table_pad, (win_pos,x_pos))
                 self.refresh_screen()
@@ -279,10 +311,35 @@ class DBInterface:
                 current_page -= 1
                 self.refresh_screen()
             elif c == self.ALT_KEY_ENTER or c == curses.KEY_ENTER:
-                if not self.list_rows_screen(table_names[win_pos]):
-                    del table_pad
+                if len(table_names) == 0:
+                    self.alert_window('No tables to select')
+                    continue
+                self.list_rows_screen(table_names[win_pos])
+                self.refresh_screen()
+            elif c == ord('a'):
+                text = self.text_window('Add New Table')
+                try:
+                    self.db.create_table(text)
+                except ProgrammingError:
+                    self.alert_window('Invalid Query!')
+                del table_win
+                return
+            elif c == ord('d'):
+                if len(table_names) == 0:
+                    self.alert_window('No tables to delete')
+                    continue
+
+                self.stdscr.nodelay(0)
+                self.alert_window('PRESSING d AGAIN WILL DELETE THIS TABLE!')
+                c = self.stdscr.getch()
+                if c == ord('d'):
+                    try:
+                        self.db.delete_table(table_names[win_pos])
+                    except ProgrammingError:
+                        self.alert_window('Invalid Query!')
+                    self.stdscr.nodelay(1)
+                    # lazily kick user back once
                     del table_win
-                    del panel1
                     return
             elif c == self.ESC_KEY:
                 del table_pad
@@ -306,27 +363,37 @@ class DBInterface:
         rows = self.db.list_rows(table_name)
 
         height, width = self.stdscr.getmaxyx()
-        menu_width = int(width * 0.33)
+        menu_width = int(width * 0.77)
         displayable_height = 10
         window_top_margin = 6
-        inner_top_margin = inner_bottom_margin = 3
+        inner_top_margin = 4
+        inner_bottom_margin = 4
         start_x = (width // 2) - (menu_width // 2)
         table_win, panel1 = self.make_panel( \
                 displayable_height+inner_top_margin+inner_bottom_margin, \
-                menu_width, window_top_margin, start_x, "Select Table")
-        table_pad = curses.newpad(10, menu_width)
+                menu_width, window_top_margin, start_x, "Select Row")
+        max_pages = int( math.ceil( (len(rows) + 2) / displayable_height ) )
+        table_pad = curses.newpad(max_pages*displayable_height, menu_width)
         table_win.box()
 
-        column_width = menu_width//len(column_names)
+        start_col = ' # '
+        stcol_len = len(start_col)
+        column_width = (menu_width-stcol_len)//len(column_names)
         win_pos = 0
 
         #TODO: put multiple things in a row
+        table_win.addstr(2,1,start_col)
+        table_win.addstr(inner_top_margin+displayable_height, 1, "a: add a new row")
+        table_win.addstr(inner_top_margin+displayable_height+1, 1,"d: delete a row")
+        table_win.addstr(inner_top_margin+displayable_height+2, 1,"m: modify a row")
+
         for idx, name in enumerate(column_names):
-            table_pad.addstr(0,idx*column_width,"| {}".format(name))
-        table_pad.addstr(1,0,'-' * menu_width)
+            table_win.addstr(2,1+idx*column_width+stcol_len,"| {}".format(name))
+        table_win.addstr(3,1,'-' * ( menu_width - 2 ) )
         for idx,row in enumerate(rows):
+            table_pad.addstr(idx,0,"{}".format(str(idx)))
             for j,name in enumerate(column_names):
-                table_pad.addstr(idx+2,j*column_width,"| {}".format(row[name]))
+                table_pad.addstr(idx,j*column_width+stcol_len,"| {}".format(row[name]))
 
         # Hide Cursor
         curses.curs_set(0)
@@ -343,7 +410,45 @@ class DBInterface:
                 del table_pad
                 del table_win
                 del panel1
-                return True
+                return
+            elif c == curses.KEY_UP:
+                current_page = max(0,current_page-1)
+            elif c == curses.KEY_DOWN:
+                current_page = min(max_pages,current_page+1)
+            elif c == ord('d'):
+                text = self.text_window(title='Please input the row you would like to delete')
+                try:
+                    num = int(text)
+                except ValueError:
+                    self.alert_window('Row must be an integer!')
+                    continue
+                if num >= len(rows):
+                    self.alert_window('That row does not exist!')
+                    continue
+                try:
+                    self.db.delete_row(table_name, rows[num])
+                except ProgrammingError:
+                    self.alert_window('Invalid Query!')
+                del table_pad
+                del table_win
+                del panel1
+                return
+            elif c == ord('a'):
+                self.add_window(table_name, column_names)
+                del table_win
+                del panel1
+                return
+            elif c == ord('m'):
+                text = self.text_window(title='Please input the row you would like to modify')
+                try:
+                    num = int(text)
+                except ValueError:
+                    self.alert_window('Row must be an integer!')
+                    continue
+                if num >= len(rows):
+                    self.alert_window('That row does not exist!')
+                    continue
+                self.modify_window(table_name, column_names, rows[num])
             table_pad.refresh((current_page - 1) * displayable_height, 0, \
                     inner_top_margin+window_top_margin, start_x+1, \
                     inner_top_margin+window_top_margin+displayable_height-1, \
@@ -639,7 +744,109 @@ class DBInterface:
                 break
         return
 
-    def alert_window(self, msg):
+    def add_window(self, table_name, column_names):
+        _, width = self.stdscr.getmaxyx()
+        menu_width = int(width * 0.77)
+        start_x = (width // 2) - (menu_width // 2)
+        height = 5
+        window_top_margin = 6
+        table_win, panel1 = self.make_panel( \
+                height+4, menu_width, window_top_margin, start_x, "Change Row:")
+        column_width = (menu_width-2)//len(column_names)
+        table_win.box()
+
+        table_win.addstr(height,1, "\\t: move field")
+        table_win.addstr(height+1,1, "Enter: change field")
+        table_win.addstr(height+2,1, "s: save row")
+        row = {}
+        for idx, name in enumerate(column_names):
+            table_win.addstr(1,idx*column_width,"| {}".format(name))
+        table_win.addstr(2,1,'-' * (menu_width-2))
+        for j,name in enumerate(column_names):
+            table_win.addstr(3,j*column_width+1,"|")
+
+        #set initial selection
+        col_pos = 0
+        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
+        while 1:
+            c = self.stdscr.getch()
+            if c == ord('\t'):
+                table_win.chgat(3, col_pos*column_width+2, column_width-1, curses.color_pair(0))
+                col_pos = col_pos+1 if col_pos+1 < len(column_names) else 0
+            elif c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
+                text = self.text_window(title='Type new value')
+                table_win.refresh()
+                self.refresh_screen()
+                table_win.addstr(3,col_pos*column_width+2, ' ' * (column_width-1))
+                table_win.addstr(3,col_pos*column_width+2, text)
+                col_name = column_names[col_pos]
+                row[col_name] = text
+            elif c == ord('s'):
+                self.db.add_row(table_name, row)
+                del table_win
+                del panel1
+                return
+            elif c == 27:
+                del table_win
+                del panel1
+                return
+
+            table_win.chgat(3, col_pos*column_width+2, column_width-1, curses.color_pair(1))
+            table_win.refresh()
+
+    def modify_window(self, table_name, column_names, row):
+        _, width = self.stdscr.getmaxyx()
+        menu_width = int(width * 0.77)
+        start_x = (width // 2) - (menu_width // 2)
+        height = 5
+        window_top_margin = 6
+        table_win, panel1 = self.make_panel( \
+                height+4, menu_width, window_top_margin, start_x, "Change Row:")
+        column_width = (menu_width-2)//len(column_names)
+        table_win.box()
+
+        table_win.addstr(height,1, "\\t: move field")
+        table_win.addstr(height+1,1, "Enter: change field")
+        table_win.addstr(height+2,1, "s: save row")
+        for idx, name in enumerate(column_names):
+            table_win.addstr(1,idx*column_width,"| {}".format(name))
+        table_win.addstr(2,1,'-' * (menu_width-2))
+        for j,name in enumerate(column_names):
+            table_win.addstr(3,j*column_width+1,"| {}".format(row[name]))
+
+        #set initial selection
+        col_pos = 0
+        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_WHITE)
+        while 1:
+            c = self.stdscr.getch()
+            if c == ord('\t'):
+                table_win.chgat(3, col_pos*column_width+2, column_width-1, curses.color_pair(0))
+                col_pos = col_pos+1 if col_pos+1 < len(column_names) else 0
+            elif c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
+                text = self.text_window(title='Type new value')
+                table_win.refresh()
+                self.refresh_screen()
+                table_win.addstr(3,col_pos*column_width+2, ' ' * (column_width-1))
+                table_win.addstr(3,col_pos*column_width+2, text)
+                col_name = column_names[col_pos]
+                row[col_name] = text
+            elif c == ord('s'):
+                try:
+                    self.db.update_row(table_name, row)
+                except Exception:
+                    self.alert_window('This is not a valid value, please change it.')
+                del table_win
+                del panel1
+                return
+            elif c == 27:
+                del table_win
+                del panel1
+                return
+
+            table_win.chgat(3, col_pos*column_width+2, column_width-1, curses.color_pair(1))
+            table_win.refresh()
+
+    def alert_window(self,msg):
         """Creates a window useful for displaying error messages"""
 
         height, width = self.stdscr.getmaxyx()
@@ -656,6 +863,23 @@ class DBInterface:
                 break
         del alert_win
         self.refresh_screen()
+
+    def text_window(self,title='Enter Text Here:'):
+        first_y = 3
+        win_height = 6
+
+        height, width = self.stdscr.getmaxyx()
+        menu_width = int(width * 0.66)
+        win1, panel1 = self.make_panel(9, menu_width, win_height, (width // 2) - (menu_width // 2), "Connect to Server:")
+        win1.addstr(first_y, 1, title)
+        panel1.top()
+        tmp_height,tmp_width = win1.getmaxyx()
+        edit_win = curses.newwin(win_height-3, tmp_width - 5, win_height + first_y + 2, (width // 2) - (menu_width // 2) + 2)
+        self.refresh_screen()
+        # fuck tmux: ITS CONTROL G to exit
+        text = curses.textpad.Textbox(edit_win).edit().rstrip()
+        del edit_win
+        return text
 
     def refresh_screen(self):
         """Refreshes the main DBInterface screen to readjust proportions."""

@@ -1,4 +1,5 @@
 import sqlalchemy
+from sqlalchemy.inspection import inspect
 from sqlalchemy.ext.automap import automap_base
 
 def get_database(db_type, username, password, server):
@@ -70,9 +71,34 @@ class Database:
         table_object = self._base.classes[table_name]
         return [row.__dict__ for row in session.query(table_object)]
 
+
+    def update_row(self, table_name, row):
+        col_names = self.list_column_names(table_name)
+        table_object = self._base.classes[table_name]
+        prim_key = inspect(table_object).primary_key[0].name
+        row_dict = {key: row[key] for key in col_names}
+        stmt = table_object.__table__.update().where(table_object.__table__.c[prim_key] == row[prim_key]).values(row_dict)
+        self._connection.execute(stmt)
+
+    def delete_row(self, table_name, row):
+        col_names = self.list_column_names(table_name)
+        table_object = self._base.classes[table_name]
+        prim_key = inspect(table_object).primary_key[0].name
+        row_dict = {key: row[key] for key in col_names}
+        stmt = table_object.__table__.delete().where(table_object.__table__.c[prim_key] == row[prim_key])
+        self._connection.execute(stmt)
+
+    def add_row(self, table_name, row):
+        col_names = self.list_column_names(table_name)
+        table_object = self._base.classes[table_name]
+        prim_key = inspect(table_object).primary_key[0].name
+        row_dict = {key: row[key] for key in col_names}
+        stmt = table_object.__table__.insert().values(row_dict)
+        self._connection.execute(stmt)
+
 class PostgresDatabase(Database):
     _protocol = "postgresql"
-    _driver = "pg8000"
+    _driver = "psycopg2"
     _database = "postgres"
 
 
@@ -81,6 +107,25 @@ class PostgresDatabase(Database):
         name_rows = result.fetchall()
         return [row['name'] for row in name_rows]
 
+    def delete_database(self, db_name):
+        self._connection.connection.set_isolation_level(0)
+        self._connection.execute('DROP DATABASE {}'.format(db_name))
+        self._connection.connection.set_isolation_level(1)
+
+    def delete_table(self, table_name):
+        self._connection.connection.set_isolation_level(0)
+        self._connection.execute('DROP TABLE {}'.format(table_name))
+        self._connection.connection.set_isolation_level(1)
+
+    def create_database(self, db_name):
+        self._connection.connection.set_isolation_level(0)
+        self._connection.execute('CREATE DATABASE {}'.format(db_name))
+        self._connection.connection.set_isolation_level(1)
+
+    def create_table(self, table_name):
+        self._connection.connection.set_isolation_level(0)
+        self._connection.execute('CREATE TABLE {}'.format(table_name))
+        self._connection.connection.set_isolation_level(1)
     # def database_connect(self, db_name):
     #     # Postgres requires you to reconnect
     #     self._engine.dispose()
@@ -99,6 +144,17 @@ class MySQLDatabase(Database):
         # db_name is a list of half-empty tuples?
         return [name[0] for name in db_names]
 
+    def delete_database(self, db_name):
+        self._connection.execute('DROP DATABASE {}'.format(db_name))
+
+    def delete_table(self, table_name):
+        self._connection.execute('DROP TABLE {}'.format(table_name))
+
+    def create_database(self, db_name):
+        self._connection.execute('CREATE DATABASE {}'.format(db_name))
+
+    def create_table(self, table_name):
+        self._connection.execute('CREATE TABLE {}'.format(table_name))
     # def database_connect(self, db_name):
     #     # doing setup again is very slow
     #     # I would prefer to use the statement:
