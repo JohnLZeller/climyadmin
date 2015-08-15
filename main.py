@@ -162,17 +162,17 @@ class DBInterface:
             elif c == curses.KEY_ENTER or c == self.ALT_KEY_ENTER:
                 tmp_y, tmp_x = self.sel_cursor
                 if tmp_y == first_y:
-                    self.init_main_menu_select_cursor(win1)
                     self.list_databases_screen()
+                    self.init_main_menu_select_cursor(win1)
                 elif tmp_y == (first_y + 1):
-                    self.init_main_menu_select_cursor(win1)
                     self.sql_select_screen()
+                    self.init_main_menu_select_cursor(win1)
                 elif tmp_y == (first_y + 2):
-                    self.init_main_menu_select_cursor(win1)
                     self.export_select_screen()
-                elif tmp_y == (first_y + 3):
                     self.init_main_menu_select_cursor(win1)
+                elif tmp_y == (first_y + 3):
                     self.import_select_screen()
+                    self.init_main_menu_select_cursor(win1)
                 else:
                     pass
             elif c == self.ESC_KEY:
@@ -279,7 +279,11 @@ class DBInterface:
                 current_page -= 1
                 self.refresh_screen()
             elif c == self.ALT_KEY_ENTER or c == curses.KEY_ENTER:
-                self.list_rows_screen(table_names[win_pos])
+                if not self.list_rows_screen(table_names[win_pos]):
+                    del table_pad
+                    del table_win
+                    del panel1
+                    return
             elif c == self.ESC_KEY:
                 del table_pad
                 del table_win
@@ -293,7 +297,12 @@ class DBInterface:
     def list_rows_screen(self,table_name):
         """Creates a menu with the rows of a table"""
 
-        column_names = self.db.list_column_names(table_name)
+        try:
+            column_names = self.db.list_column_names(table_name)
+        except KeyError:
+            self.alert_window("Failed to access table. Ensure that '{0}' has a primary key.")
+            return False
+
         rows = self.db.list_rows(table_name)
 
         height, width = self.stdscr.getmaxyx()
@@ -334,7 +343,7 @@ class DBInterface:
                 del table_pad
                 del table_win
                 del panel1
-                return
+                return True
             table_pad.refresh((current_page - 1) * displayable_height, 0, \
                     inner_top_margin+window_top_margin, start_x+1, \
                     inner_top_margin+window_top_margin+displayable_height-1, \
