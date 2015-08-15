@@ -244,6 +244,7 @@ class DBInterface:
                     del db_win
                     return
                 self.stdscr.nodelay(1)
+                self.init_main_menu_select_cursor(db_win)
             elif c == self.ESC_KEY:
                 del db_win
                 return
@@ -341,6 +342,7 @@ class DBInterface:
                     # lazily kick user back once
                     del table_win
                     return
+                self.init_main_menu_select_cursor(table_win)
             elif c == self.ESC_KEY:
                 del table_pad
                 del table_win
@@ -357,7 +359,7 @@ class DBInterface:
         try:
             column_names = self.db.list_column_names(table_name)
         except KeyError:
-            self.alert_window("Failed to access table. Ensure that '{0}' has a primary key.")
+            self.alert_window("Failed to access table. Ensure that '{0}' has a primary key.".format(table_name))
             return False
 
         rows = self.db.list_rows(table_name)
@@ -578,12 +580,13 @@ class DBInterface:
         mysql_command = "mysqldump --all-databases -u{0} -p{1} -h{2} > {3} 2>/dev/null".format(args.username, args.password, args.server, filename)
 
         # TODO: Test this!
-        postgres_command = "pg_dumpall > {0} 2>/dev/null".format(filename)
+        postgres_command = "pg_dumpall --username={0} --host={1} > {2} 2>/dev/null".format(args.username, args.server, filename)
 
         if self.args.dbms == 'postgres':
             # TODO: Test this!
             # You can use a .pgpass in the home dir of the account that this will run to supply the password
             os.system("echo {0}:*:*:{1}:{2} > ~/.pgpass".format(args.server, args.username, args.password))
+            os.system("chmod 600 ~/.pgpass")
             ret = os.system(postgres_command)
             os.system("rm ~/.pgpass")
         elif self.args.dbms == 'mysql':
@@ -656,12 +659,15 @@ class DBInterface:
         height, width = self.stdscr.getmaxyx()
 
         mysql_command = "mysqldump {0} -u{1} -p{2} -h{3} > {4} 2>/dev/null".format(selection, args.username, args.password, args.server, filename)
-        postgres_command = "pg_dump {0} > {1} 2>/dev/null".format(selection, filename)
+        postgres_command = "pg_dump --username={0} --host={1} {2} > {3} 2>/dev/null".format(args.username, args.server, selection, filename)
+        
+        self.alert_window("Attempting Export!")
 
         if self.args.dbms == 'postgres':
             # TODO: Test this!
             # You can use a .pgpass in the home dir of the account that this will run to supply the password
             os.system("echo {0}:*:*:{1}:{2} > ~/.pgpass".format(args.server, args.username, args.password))
+            os.system("chmod 600 ~/.pgpass")
             ret = os.system(postgres_command)
             os.system("rm ~/.pgpass")
         elif self.args.dbms == 'mysql':
@@ -728,9 +734,10 @@ class DBInterface:
         menu_width = int(width * 0.33)
 
         try:
+            self.alert_window("Attempting Import!")
             self.db.execute(data)
             alert_win, panel1 = self.make_panel(9, menu_width, 6, (width // 2) - (menu_width // 2), "Imported SQL from '{0}'!".format(filename))
-        except Exception:
+        except Exception as e:
             alert_win, panel1 = self.make_panel(9, menu_width, 6, (width // 2) - (menu_width // 2), "Failed to import SQL from '{0}'!".format(filename))
 
         curses.panel.update_panels()
@@ -850,10 +857,14 @@ class DBInterface:
         """Creates a window useful for displaying error messages"""
 
         height, width = self.stdscr.getmaxyx()
-        menu_width = int(width * 0.33)
-        alert_win = curses.newwin(9, menu_width, 6, (width // 2) - (menu_width // 2))
+        menu_width = int(width * 0.5)
+        alert_win, panel1 = self.make_panel(9, int(menu_width), 6, int((width / 2) - (menu_width / 2)), "")
         alert_win.box()
-        alert_win.addstr(9 // 2, menu_width // 2 - menu_width // 4, msg)
+
+        half_menu = menu_width / 2
+        alert_win.addstr(1, 1, msg)
+        alert_win.addstr(2, 1, "Press ENTER to dismiss this message.")
+        panel1.top()
 
         self.refresh_screen()
         alert_win.refresh()
